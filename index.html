@@ -824,6 +824,14 @@ function toggleTheme() {
   localStorage.setItem('beep_theme', isLight ? 'light' : 'dark');
 }
 
+// ─── THEME SYNC (postMessage from parent frame) ──────────────────────────────
+window.addEventListener('message', e => {
+  if (e.data?.type !== 'theme') return;
+  const isLight = e.data.theme === 'light';
+  document.body.classList.toggle('light', isLight);
+  setThemeIcon(isLight);
+});
+
 // ─── KEYBOARD ────────────────────────────────────────────────────────────────
 document.getElementById('cmdInput').addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); runBeep(); }
