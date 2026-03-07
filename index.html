@@ -1,0 +1,867 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0a0f0a">
+<meta name="description" content="beep — terminal tone player">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<title>beep terminal</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;700&display=swap');
+
+  :root {
+    --green: #00ff41;
+    --green-dim: #00aa2b;
+    --green-glow: rgba(0,255,65,0.15);
+    --bg: #0a0f0a;
+    --bg2: #0d140d;
+    --amber: #ffb800;
+    --red: #ff3c3c;
+    --cyan: #00ffff;
+    --titlebar-bg: linear-gradient(180deg, #1a2a1a, #0f1a0f);
+    --scanline: rgba(0,0,0,0.08);
+    --vignette: rgba(0,0,0,0.6);
+    --terminal-shadow: 0 0 20px rgba(0,255,65,0.08), 0 0 60px rgba(0,255,65,0.04), inset 0 0 30px rgba(0,0,0,0.5);
+  }
+
+  body.light {
+    --green: #006818;
+    --green-dim: #3a7a48;
+    --green-glow: rgba(0,104,24,0.1);
+    --bg: #f5f7f5;
+    --bg2: #ffffff;
+    --amber: #a05c00;
+    --red: #bb1a1a;
+    --cyan: #005f6b;
+    --titlebar-bg: linear-gradient(180deg, #e2ebe2, #d6e4d6);
+    --scanline: rgba(0,0,0,0.02);
+    --vignette: rgba(0,0,0,0.08);
+    --terminal-shadow: 0 2px 16px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,104,24,0.15);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--green);
+    font-family: 'IBM Plex Mono', 'Courier New', monospace;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    overflow-x: hidden;
+  }
+
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, var(--scanline) 2px, var(--scanline) 4px);
+    pointer-events: none; z-index: 100;
+  }
+
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background: radial-gradient(ellipse at center, transparent 60%, var(--vignette) 100%);
+    pointer-events: none; z-index: 99;
+  }
+
+  .terminal {
+    width: 100%; max-width: 820px;
+    background: var(--bg2);
+    border: 1px solid var(--green-dim);
+    border-radius: 4px;
+    box-shadow: var(--terminal-shadow);
+    overflow: hidden;
+  }
+
+  .titlebar {
+    background: var(--titlebar-bg);
+    border-bottom: 1px solid var(--green-dim);
+    padding: 8px 14px;
+    display: flex; align-items: center; gap: 10px;
+    user-select: none;
+  }
+
+  .theme-btn {
+    background: none; border: none; cursor: pointer;
+    padding: 0; width: 20px; height: 20px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--green-dim); transition: color 0.15s;
+    letter-spacing: 0; text-transform: none;
+  }
+  .theme-btn:hover { color: var(--green); }
+  .theme-btn svg { width: 14px; height: 14px; fill: currentColor; stroke: currentColor; }
+
+  .dot { width: 12px; height: 12px; border-radius: 50%; }
+  .dot.r { background: #ff5f56; }
+  .dot.y { background: #ffbd2e; }
+  .dot.g { background: #27c93f; }
+
+  .titlebar-text {
+    flex: 1; text-align: center;
+    font-size: 11px; color: var(--green-dim);
+    letter-spacing: 2px; text-transform: uppercase;
+  }
+
+  .output {
+    padding: 16px;
+    min-height: 160px; max-height: 260px;
+    overflow-y: auto; font-size: 13px; line-height: 1.6;
+    scrollbar-width: thin; scrollbar-color: var(--green-dim) transparent;
+  }
+
+  .output-line { display: block; white-space: pre-wrap; word-break: break-all; animation: fadein 0.1s ease; }
+  @keyframes fadein { from { opacity:0 } to { opacity:1 } }
+
+  .prompt-line  { color: var(--green); }
+  .info-line    { color: var(--green-dim); }
+  .error-line   { color: var(--red); }
+  .playing-line { color: var(--cyan); }
+  .success-line { color: var(--green); font-weight: 700; }
+  .warn-line    { color: var(--amber); }
+
+  .tabs {
+    display: flex;
+    border-bottom: 1px solid rgba(0,255,65,0.15);
+    background: rgba(0,0,0,0.12);
+  }
+  body.light .tabs {
+    background: rgba(0,0,0,0.04);
+    border-bottom-color: rgba(0,104,24,0.15);
+  }
+
+  .tab {
+    padding: 8px 18px; font-size: 11px;
+    letter-spacing: 1px; text-transform: uppercase;
+    color: var(--green-dim); cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.15s; user-select: none;
+    font-family: inherit;
+    background: none; outline: none; border-top: none; border-left: none; border-right: none;
+  }
+  .tab.active { color: var(--green); border-bottom-color: var(--green); background: rgba(0,255,65,0.05); }
+  .tab:hover:not(.active) { color: var(--green); }
+
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* === PLAY TAB === */
+  .input-area {
+    display: flex; align-items: flex-start;
+    padding: 12px 16px 0; gap: 8px;
+  }
+
+  .prompt-label {
+    color: var(--green); font-size: 13px;
+    white-space: nowrap; padding-top: 2px;
+    text-shadow: 0 0 8px var(--green);
+  }
+
+  textarea {
+    flex: 1; background: transparent; border: none; outline: none;
+    color: var(--green); font-family: inherit; font-size: 13px;
+    line-height: 1.6; resize: none; min-height: 44px;
+    caret-color: var(--green);
+    text-shadow: 0 0 6px rgba(0,255,65,0.5);
+  }
+  textarea::placeholder { color: rgba(0,255,65,0.25); }
+
+  .progress-bar-wrap {
+    margin: 10px 16px 0; height: 3px;
+    background: rgba(0,255,65,0.1); border-radius: 2px; overflow: hidden;
+    opacity: 0; transition: opacity 0.2s;
+  }
+  .progress-bar-wrap.active { opacity: 1; }
+  .progress-bar {
+    height: 100%; background: var(--green); width: 0%;
+    transition: width 0.08s linear; box-shadow: 0 0 8px var(--green);
+  }
+
+  .btn-row {
+    padding: 10px 16px 14px;
+    display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+  }
+
+  button {
+    font-family: inherit; font-size: 11px;
+    letter-spacing: 1px; text-transform: uppercase;
+    padding: 7px 16px; border-radius: 2px; cursor: pointer;
+    transition: all 0.1s;
+  }
+
+  .btn-run {
+    background: var(--green); color: #000; border: none;
+    font-weight: 700; box-shadow: 0 0 12px rgba(0,255,65,0.3);
+  }
+  .btn-run:hover { box-shadow: 0 0 22px rgba(0,255,65,0.5); }
+  .btn-run:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .btn-stop { background: transparent; color: var(--red); border: 1px solid var(--red); }
+  .btn-stop:hover { background: rgba(255,60,60,0.1); }
+  .btn-stop:disabled { opacity: 0.3; cursor: not-allowed; }
+
+  .btn-ghost { background: transparent; color: var(--green-dim); border: 1px solid var(--green-dim); }
+  .btn-ghost:hover { background: var(--green-glow); color: var(--green); border-color: var(--green); }
+
+  .btn-amber { background: transparent; color: var(--amber); border: 1px solid var(--amber); }
+  .btn-amber:hover { background: rgba(255,184,0,0.1); }
+
+  .btn-cyan { background: transparent; color: var(--cyan); border: 1px solid var(--cyan); }
+  .btn-cyan:hover { background: rgba(0,255,255,0.08); }
+
+  .meta { margin-left: auto; font-size: 11px; color: var(--green-dim); }
+
+  /* === SPEED SLIDER === */
+  .speed-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 0 16px 10px;
+    font-size: 11px; color: var(--green-dim);
+  }
+
+  .speed-label { white-space: nowrap; letter-spacing: 1px; text-transform: uppercase; }
+
+  .speed-value {
+    min-width: 38px; text-align: right;
+    color: var(--green); font-weight: 700;
+  }
+  .speed-value.off-center { color: var(--amber); }
+
+  input[type=range].speed-slider {
+    flex: 1; appearance: none; background: transparent;
+    height: 3px; outline: none; cursor: pointer; padding: 0;
+  }
+  input[type=range].speed-slider::-webkit-slider-runnable-track {
+    height: 3px; border-radius: 2px;
+    background: linear-gradient(to right, var(--green) var(--pct, 30%), rgba(0,255,65,0.15) var(--pct, 30%));
+  }
+  input[type=range].speed-slider::-moz-range-track {
+    height: 3px; border-radius: 2px; background: rgba(0,255,65,0.15);
+  }
+  input[type=range].speed-slider::-webkit-slider-thumb {
+    appearance: none; width: 12px; height: 12px; border-radius: 50%;
+    background: var(--green); margin-top: -4.5px;
+    box-shadow: 0 0 6px var(--green);
+  }
+  input[type=range].speed-slider::-moz-range-thumb {
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--green); border: none;
+    box-shadow: 0 0 6px var(--green);
+  }
+  input[type=range].speed-slider.off-center::-webkit-slider-thumb { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+  input[type=range].speed-slider.off-center::-moz-range-thumb     { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+
+  /* === PRESETS TAB === */
+  .presets-panel { padding: 14px 16px; }
+
+  .preset-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; min-height: 40px; }
+
+  .preset-item {
+    display: flex; align-items: center; gap: 8px;
+    background: rgba(0,255,65,0.04); border: 1px solid rgba(0,255,65,0.1);
+    border-radius: 2px; padding: 7px 10px;
+    transition: background 0.1s;
+  }
+  .preset-item:hover { background: rgba(0,255,65,0.08); }
+
+  .preset-name {
+    flex: 1; font-size: 13px; color: var(--green); cursor: pointer;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .preset-name:hover { text-decoration: underline; }
+
+  .preset-notes { font-size: 11px; color: var(--green-dim); white-space: nowrap; }
+
+  .preset-btn {
+    background: none; border: none; cursor: pointer;
+    font-size: 11px; padding: 2px 6px; border-radius: 2px;
+  }
+  .preset-btn.load { color: var(--cyan); }
+  .preset-btn.load:hover { background: rgba(0,255,255,0.1); }
+  .preset-btn.share { color: var(--amber); }
+  .preset-btn.share:hover { background: rgba(255,184,0,0.1); }
+  .preset-btn.del { color: var(--red); }
+  .preset-btn.del:hover { background: rgba(255,60,60,0.1); }
+
+  .save-row {
+    display: flex; gap: 8px; align-items: center;
+    border-top: 1px solid rgba(0,255,65,0.1);
+    padding-top: 12px;
+  }
+
+  .save-input {
+    flex: 1; background: transparent; border: 1px solid rgba(0,255,65,0.2);
+    border-radius: 2px; padding: 7px 10px;
+    color: var(--green); font-family: inherit; font-size: 13px; outline: none;
+  }
+  .save-input:focus { border-color: var(--green); }
+  .save-input::placeholder { color: rgba(0,255,65,0.25); }
+
+  .no-presets { color: var(--green-dim); font-size: 12px; padding: 8px 0; }
+
+  /* === SHARE TOAST === */
+  .toast {
+    position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%) translateY(20px);
+    background: #0d2a0d; border: 1px solid var(--green);
+    color: var(--green); font-family: inherit; font-size: 12px;
+    padding: 10px 20px; border-radius: 3px; z-index: 200;
+    opacity: 0; transition: all 0.2s; pointer-events: none;
+    box-shadow: 0 0 20px rgba(0,255,65,0.2);
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  @keyframes glitch {
+    0%   { transform: translate(0); }
+    20%  { transform: translate(-1px, 1px); }
+    40%  { transform: translate(1px, -1px); }
+    60%  { transform: translate(-1px, 0); }
+    80%  { transform: translate(1px, 1px); }
+    100% { transform: translate(0); }
+  }
+  .glitching { animation: glitch 0.15s ease; }
+</style>
+</head>
+<body>
+<div class="terminal" id="terminal">
+  <div class="titlebar">
+    <div class="dot r"></div>
+    <div class="dot y"></div>
+    <div class="dot g"></div>
+    <span class="titlebar-text">bash — beep terminal v1.0</span>
+    <button class="theme-btn" id="themeBtn" onclick="toggleTheme()" title="Toggle light/dark mode"></button>
+  </div>
+
+  <div class="output" id="output">
+    <span class="output-line info-line">Linux beep 6.1.0 #1 SMP x86_64 GNU/Linux</span>
+    <span class="output-line info-line">Type a beep command · Ctrl+Enter to run · beep -h for help</span>
+    <span class="output-line info-line">────────────────────────────────────────────────</span>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('play')">▶ Play</button>
+    <button class="tab" onclick="switchTab('presets')">♪ Presets</button>
+  </div>
+
+  <!-- PLAY TAB -->
+  <div class="tab-panel active" id="tab-play">
+    <div class="input-area">
+      <span class="prompt-label">$&nbsp;</span>
+      <textarea id="cmdInput" rows="3" spellcheck="false"
+        placeholder="beep -f 440 -l 500 -n -f 880 -l 300"></textarea>
+    </div>
+
+    <div class="speed-row">
+      <span class="speed-label">Speed</span>
+      <input type="range" class="speed-slider" id="speedSlider" min="10" max="300" value="100" step="5">
+      <span class="speed-value" id="speedValue">100%</span>
+      <button class="btn-ghost" id="speedReset" onclick="resetSpeed()" style="display:none;padding:3px 8px;font-size:10px">reset</button>
+    </div>
+
+    <div class="progress-bar-wrap" id="progressWrap">
+      <div class="progress-bar" id="progressBar"></div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn-run"   id="btnRun"  onclick="runBeep()">▶ Run</button>
+      <button class="btn-stop"  id="btnStop" onclick="stopBeep()" disabled>■ Stop</button>
+      <button class="btn-ghost" onclick="clearOutput()">Clear</button>
+      <button class="btn-ghost" onclick="showHelp()">Help</button>
+      <button class="btn-amber" onclick="loadExample()">Example</button>
+      <button class="btn-cyan"  onclick="downloadWav()">Download WAV</button>
+      <button class="btn-cyan"  onclick="shareCurrentCmd()">Share ⎘</button>
+      <span   class="meta"      id="metaInfo"></span>
+    </div>
+  </div>
+
+  <!-- PRESETS TAB -->
+  <div class="tab-panel" id="tab-presets">
+    <div class="presets-panel">
+      <div class="preset-list" id="presetList"></div>
+      <div class="save-row">
+        <input class="save-input" id="presetName" type="text" placeholder="Preset name…" maxlength="40">
+        <button class="btn-amber" onclick="savePreset()">Save current</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ─── EXAMPLE ────────────────────────────────────────────────────────────────
+const EXAMPLE = "beep -f 659 -l 430 -n -f 784 -l 318 -n -f 659 -l 216 -n -f 659 -l 103 -n -f 880 -l 216 -n -f 659 -l 216 -n -f 587 -l 216 -n -f 659 -l 430 -n -f 988 -l 318 -n -f 659 -l 216 -n -f 659 -l 103 -n -f 1047 -l 216 -n -f 988 -l 216 -n -f 784 -l 216 -n -f 659 -l 216 -n -f 988 -l 216 -n -f 1318 -l 216 -n -f 659 -l 103 -n -f 587 -l 216 -n -f 587 -l 103 -n -f 494 -l 216 -n -f 740 -l 216 -n -f 659 -l 430";
+
+// ─── STATE ──────────────────────────────────────────────────────────────────
+let audioCtx = null;
+let stopRequested = false;
+let isPlaying = false;
+
+// ─── SPEED ───────────────────────────────────────────────────────────────────
+function getSpeedFactor() {
+  return parseInt(document.getElementById('speedSlider').value, 10) / 100;
+}
+
+function applySpeed(notes) {
+  const f = getSpeedFactor();
+  if (f === 1) return notes;
+  return notes.map(n => ({ freq: n.freq, dur: n.dur / f, delay: n.delay / f }));
+}
+
+function speededCmd(cmd) {
+  const f = getSpeedFactor();
+  if (f === 1) return cmd;
+  // rebuild command with scaled -l and -d values
+  return cmd.replace(/(-[ld])\s+(\d+(\.\d+)?)/g, (_, flag, val) =>
+    `${flag} ${Math.round(parseFloat(val) / f)}`
+  );
+}
+
+function updateSpeedUI() {
+  const val = parseInt(document.getElementById('speedSlider').value, 10);
+  const label = document.getElementById('speedValue');
+  const slider = document.getElementById('speedSlider');
+  const reset = document.getElementById('speedReset');
+  const off = val !== 100;
+  label.textContent = val + '%';
+  label.classList.toggle('off-center', off);
+  slider.classList.toggle('off-center', off);
+  reset.style.display = off ? '' : 'none';
+  // update track fill for webkit
+  const pct = ((val - 10) / (300 - 10)) * 100;
+  slider.style.setProperty('--pct', pct + '%');
+  updateMeta();
+}
+
+function resetSpeed() {
+  document.getElementById('speedSlider').value = 100;
+  updateSpeedUI();
+}
+
+// ─── AUDIO ──────────────────────────────────────────────────────────────────
+function getCtx() {
+  if (!audioCtx || audioCtx.state === 'closed') {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  return audioCtx;
+}
+
+// ─── PARSER ─────────────────────────────────────────────────────────────────
+function parseBeep(cmd) {
+  cmd = cmd.trim();
+  if (cmd === 'beep -h' || cmd === 'beep --help') return 'help';
+  if (!cmd.startsWith('beep')) return null;
+
+  const notes = [];
+  const raw = cmd.replace(/^beep\s*/, '');
+  // Split on -n separators (note separator)
+  const groups = raw.split(/(?:^|\s)-n(?:\s|$)/);
+
+  for (const group of groups) {
+    if (!group.trim()) continue;
+    const tokens = group.trim().split(/\s+/);
+    let freq = 440, dur = 200, delay = 0;
+    for (let i = 0; i < tokens.length; i++) {
+      if      (tokens[i] === '-f' && tokens[i+1]) { freq  = parseFloat(tokens[++i]); }
+      else if (tokens[i] === '-l' && tokens[i+1]) { dur   = parseFloat(tokens[++i]); }
+      else if (tokens[i] === '-d' && tokens[i+1]) { delay = parseFloat(tokens[++i]); }
+    }
+    if (!isNaN(freq) && !isNaN(dur)) notes.push({ freq, dur, delay });
+  }
+  return notes;
+}
+
+// ─── OUTPUT ─────────────────────────────────────────────────────────────────
+function log(text, cls = 'info-line') {
+  const out = document.getElementById('output');
+  const span = document.createElement('span');
+  span.className = `output-line ${cls}`;
+  span.textContent = text;
+  out.appendChild(span);
+  out.scrollTop = out.scrollHeight;
+}
+
+function updateMeta() {
+  const cmd = document.getElementById('cmdInput').value;
+  const raw = parseBeep(cmd);
+  const el = document.getElementById('metaInfo');
+  if (Array.isArray(raw) && raw.length > 0) {
+    const notes = applySpeed(raw);
+    const total = notes.reduce((s, n) => s + n.dur + n.delay, 0);
+    el.textContent = `${notes.length} note${notes.length !== 1 ? 's' : ''} · ${(total/1000).toFixed(2)}s`;
+  } else {
+    el.textContent = '';
+  }
+}
+
+document.getElementById('cmdInput').addEventListener('input', updateMeta);
+document.getElementById('speedSlider').addEventListener('input', updateSpeedUI);
+
+// ─── PLAY ────────────────────────────────────────────────────────────────────
+async function runBeep() {
+  if (isPlaying) return;
+  const cmd = document.getElementById('cmdInput').value.trim();
+  log('$ ' + cmd, 'prompt-line');
+
+  if (cmd === 'beep -h' || cmd === 'beep --help') {
+    log('Usage: beep [-f FREQ] [-l MS] [-n] [-d MS] ...', 'info-line');
+    log('  -f FREQ   frequency in Hz (default: 440)', 'info-line');
+    log('  -l MS     duration in milliseconds (default: 200)', 'info-line');
+    log('  -d MS     delay before note in milliseconds', 'info-line');
+    log('  -n        next note separator', 'info-line');
+    return;
+  }
+
+  if (!cmd.startsWith('beep')) {
+    log(`bash: ${cmd.split(' ')[0]}: command not found`, 'error-line');
+    return;
+  }
+
+  const rawNotes = parseBeep(cmd);
+  if (!Array.isArray(rawNotes) || rawNotes.length === 0) {
+    log('beep: no notes parsed — check your syntax', 'error-line');
+    return;
+  }
+
+  const notes = applySpeed(rawNotes);
+  const speed = getSpeedFactor();
+  const totalMs = notes.reduce((s, n) => s + n.dur + n.delay, 0);
+  const speedStr = speed !== 1 ? ` · ${Math.round(speed * 100)}% speed` : '';
+  log(`Playing ${notes.length} note${notes.length !== 1 ? 's' : ''} · ${(totalMs/1000).toFixed(2)}s${speedStr}`, 'playing-line');
+
+  isPlaying = true;
+  stopRequested = false;
+  document.getElementById('btnRun').disabled = true;
+  document.getElementById('btnStop').disabled = false;
+  document.getElementById('progressWrap').classList.add('active');
+  document.getElementById('terminal').classList.add('glitching');
+  setTimeout(() => document.getElementById('terminal').classList.remove('glitching'), 200);
+
+  try {
+    const ctx = getCtx();
+    let elapsed = 0;
+    const progressBar = document.getElementById('progressBar');
+
+    for (let i = 0; i < notes.length; i++) {
+      if (stopRequested) { log('^C', 'error-line'); break; }
+      const { freq, dur, delay } = notes[i];
+
+      if (delay > 0) {
+        await sleep(delay);
+        if (stopRequested) break;
+      }
+
+      const osc  = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(freq, ctx.currentTime);
+
+      gain.gain.setValueAtTime(0, ctx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.18, ctx.currentTime + 0.008);
+      gain.gain.linearRampToValueAtTime(0.15, ctx.currentTime + Math.max(dur/1000 - 0.015, 0.01));
+      gain.gain.linearRampToValueAtTime(0, ctx.currentTime + dur/1000);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + dur/1000);
+
+      await sleep(dur);
+      if (stopRequested) break;
+      elapsed += dur + delay;
+      progressBar.style.width = Math.min(100, (elapsed / totalMs) * 100) + '%';
+    }
+  } catch(e) {
+    log('beep: audio error: ' + e.message, 'error-line');
+  }
+
+  if (!stopRequested) {
+    log('[done]', 'success-line');
+    document.getElementById('progressBar').style.width = '100%';
+    setTimeout(() => {
+      document.getElementById('progressBar').style.width = '0%';
+      document.getElementById('progressWrap').classList.remove('active');
+    }, 400);
+  } else {
+    document.getElementById('progressBar').style.width = '0%';
+    document.getElementById('progressWrap').classList.remove('active');
+  }
+
+  isPlaying = false;
+  stopRequested = false;
+  document.getElementById('btnRun').disabled = false;
+  document.getElementById('btnStop').disabled = true;
+}
+
+function stopBeep() {
+  if (!isPlaying) return;
+  stopRequested = true;
+  try { if (audioCtx) { audioCtx.close(); audioCtx = null; } } catch(e) {}
+}
+
+function sleep(ms) {
+  return new Promise(resolve => {
+    let timer = setTimeout(resolve, ms);
+    const check = setInterval(() => {
+      if (stopRequested) { clearTimeout(timer); clearInterval(check); resolve(); }
+    }, 20);
+    setTimeout(() => clearInterval(check), ms + 100);
+  });
+}
+
+// ─── TABS ────────────────────────────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach((t, i) => {
+    t.classList.toggle('active', ['play','presets'][i] === name);
+  });
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  if (name === 'presets') renderPresets();
+}
+
+// ─── PRESETS ─────────────────────────────────────────────────────────────────
+function getPresets() {
+  try { return JSON.parse(localStorage.getItem('beep_presets') || '[]'); } catch { return []; }
+}
+
+function savePresets(list) {
+  localStorage.setItem('beep_presets', JSON.stringify(list));
+}
+
+function savePreset() {
+  const name = document.getElementById('presetName').value.trim();
+  const cmd  = document.getElementById('cmdInput').value.trim();
+  if (!name) { showToast('Enter a name first'); return; }
+  if (!cmd.startsWith('beep')) { showToast('Nothing to save — write a beep command first'); return; }
+
+  const notes = parseBeep(cmd);
+  const list = getPresets();
+  // replace if same name
+  const idx = list.findIndex(p => p.name === name);
+  const entry = {
+    name,
+    cmd,
+    notes: Array.isArray(notes) ? notes.length : 0,
+    saved: Date.now()
+  };
+  if (idx >= 0) list[idx] = entry; else list.unshift(entry);
+  savePresets(list);
+  document.getElementById('presetName').value = '';
+  renderPresets();
+  showToast(`Saved "${name}"`);
+  log(`preset saved: "${name}"`, 'success-line');
+}
+
+function loadPreset(cmd) {
+  document.getElementById('cmdInput').value = cmd;
+  updateMeta();
+  switchTab('play');
+  log(`preset loaded`, 'info-line');
+}
+
+function deletePreset(name) {
+  const list = getPresets().filter(p => p.name !== name);
+  savePresets(list);
+  renderPresets();
+  showToast(`Deleted "${name}"`);
+}
+
+function renderPresets() {
+  const list = getPresets();
+  const el = document.getElementById('presetList');
+  if (list.length === 0) {
+    el.innerHTML = '<span class="no-presets">No presets yet — save a beep command from the Play tab.</span>';
+    return;
+  }
+  el.innerHTML = list.map(p => `
+    <div class="preset-item">
+      <span class="preset-name" onclick="loadPreset(${JSON.stringify(p.cmd)})" title="${p.cmd}">${p.name}</span>
+      <span class="preset-notes">${p.notes} notes</span>
+      <button class="preset-btn load"  onclick="loadPreset(${JSON.stringify(p.cmd)})">load</button>
+      <button class="preset-btn share" onclick="shareCmd(${JSON.stringify(p.cmd)})">share</button>
+      <button class="preset-btn del"   onclick="deletePreset(${JSON.stringify(p.name)})">✕</button>
+    </div>
+  `).join('');
+}
+
+// ─── SHARING ─────────────────────────────────────────────────────────────────
+function shareCmd(cmd) {
+  const url = new URL(window.location.href);
+  url.searchParams.set('cmd', cmd);
+  navigator.clipboard.writeText(url.toString())
+    .then(() => showToast('Share URL copied to clipboard!'))
+    .catch(() => {
+      // fallback: show in output
+      log('Share URL:', 'info-line');
+      log(url.toString(), 'warn-line');
+    });
+}
+
+function shareCurrentCmd() {
+  const cmd = document.getElementById('cmdInput').value.trim();
+  if (!cmd.startsWith('beep')) { showToast('Write a beep command first'); return; }
+  shareCmd(speededCmd(cmd));
+}
+
+// ─── TOAST ───────────────────────────────────────────────────────────────────
+let toastTimer = null;
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+// ─── UTILS ───────────────────────────────────────────────────────────────────
+function clearOutput() {
+  document.getElementById('output').innerHTML =
+    '<span class="output-line info-line">────────────────────────────────────────────────</span>';
+}
+
+function loadExample() {
+  document.getElementById('cmdInput').value = EXAMPLE;
+  updateMeta();
+}
+
+function showHelp() {
+  const input = document.getElementById('cmdInput');
+  input.value = 'beep -h';
+  updateMeta();
+  runBeep();
+}
+
+// ─── DOWNLOAD WAV ────────────────────────────────────────────────────────────
+async function downloadWav() {
+  const cmd = document.getElementById('cmdInput').value.trim();
+  if (!cmd.startsWith('beep')) { showToast('Write a beep command first'); return; }
+  const rawNotes = parseBeep(cmd);
+  if (!Array.isArray(rawNotes) || rawNotes.length === 0) { showToast('No notes to export'); return; }
+
+  const notes = applySpeed(rawNotes);
+  const totalMs = notes.reduce((s, n) => s + n.dur + n.delay, 0);
+  const sampleRate = 44100;
+  const totalSec = totalMs / 1000;
+  const offCtx = new OfflineAudioContext(1, Math.ceil(sampleRate * totalSec), sampleRate);
+
+  let offsetSec = 0;
+  for (const { freq, dur, delay } of notes) {
+    offsetSec += delay / 1000;
+    const durSec = dur / 1000;
+    const osc  = offCtx.createOscillator();
+    const gain = offCtx.createGain();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(freq, offsetSec);
+    gain.gain.setValueAtTime(0, offsetSec);
+    gain.gain.linearRampToValueAtTime(0.18, offsetSec + 0.008);
+    gain.gain.linearRampToValueAtTime(0.15, offsetSec + Math.max(durSec - 0.015, 0.01));
+    gain.gain.linearRampToValueAtTime(0, offsetSec + durSec);
+    osc.connect(gain);
+    gain.connect(offCtx.destination);
+    osc.start(offsetSec);
+    osc.stop(offsetSec + durSec);
+    offsetSec += durSec;
+  }
+
+  const buffer = await offCtx.startRendering();
+  const wav = audioBufferToWav(buffer);
+  const blob = new Blob([wav], { type: 'audio/wav' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'beep.wav';
+  a.click();
+  URL.revokeObjectURL(url);
+  log('WAV downloaded', 'success-line');
+}
+
+function audioBufferToWav(buffer) {
+  const samples = buffer.getChannelData(0);
+  const numSamples = samples.length;
+  const arrayBuffer = new ArrayBuffer(44 + numSamples * 2);
+  const view = new DataView(arrayBuffer);
+  const sampleRate = buffer.sampleRate;
+
+  function writeStr(offset, str) {
+    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+  }
+  function clamp(v) { return Math.max(-1, Math.min(1, v)); }
+
+  writeStr(0, 'RIFF');
+  view.setUint32(4, 36 + numSamples * 2, true);
+  writeStr(8, 'WAVE');
+  writeStr(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);          // PCM
+  view.setUint16(22, 1, true);          // mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeStr(36, 'data');
+  view.setUint32(40, numSamples * 2, true);
+  for (let i = 0; i < numSamples; i++) {
+    view.setInt16(44 + i * 2, clamp(samples[i]) * 0x7FFF, true);
+  }
+  return arrayBuffer;
+}
+
+// ─── THEME ───────────────────────────────────────────────────────────────────
+const SVG_SUN  = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/><line x1="4.93" y1="4.93" x2="7.05" y2="7.05"/><line x1="16.95" y1="16.95" x2="19.07" y2="19.07"/><line x1="19.07" y1="4.93" x2="16.95" y2="7.05"/><line x1="7.05" y1="16.95" x2="4.93" y2="19.07"/></svg>`;
+const SVG_MOON = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z"/></svg>`;
+
+function setThemeIcon(isLight) {
+  document.getElementById('themeBtn').innerHTML = isLight ? SVG_MOON : SVG_SUN;
+}
+
+function toggleTheme() {
+  const isLight = document.body.classList.toggle('light');
+  setThemeIcon(isLight);
+  localStorage.setItem('beep_theme', isLight ? 'light' : 'dark');
+}
+
+// ─── KEYBOARD ────────────────────────────────────────────────────────────────
+document.getElementById('cmdInput').addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); runBeep(); }
+});
+
+// ─── INIT ────────────────────────────────────────────────────────────────────
+window.addEventListener('load', () => {
+  // Check for ?cmd= URL param (shared link)
+  const params = new URLSearchParams(window.location.search);
+  if (params.has('cmd')) {
+    const sharedCmd = params.get('cmd');
+    document.getElementById('cmdInput').value = sharedCmd;
+    log('Shared command loaded from URL', 'warn-line');
+    log('Press [ RUN ] or Ctrl+Enter to play', 'info-line');
+  } else {
+    // show help in terminal, load example into input silently
+    log('$ beep -h', 'prompt-line');
+    log('Usage: beep [-f FREQ] [-l MS] [-n] [-d MS] ...', 'info-line');
+    log('  -f FREQ   frequency in Hz (default: 440)', 'info-line');
+    log('  -l MS     duration in milliseconds (default: 200)', 'info-line');
+    log('  -d MS     delay before note in milliseconds', 'info-line');
+    log('  -n        next note separator', 'info-line');
+    loadExample();
+  }
+  updateSpeedUI();
+
+  // Restore theme preference
+  const savedTheme = localStorage.getItem('beep_theme');
+  if (savedTheme === 'light') {
+    document.body.classList.add('light');
+  }
+  setThemeIcon(savedTheme === 'light');
+
+  // Register service worker
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+});
+</script>
+</body>
+</html>
